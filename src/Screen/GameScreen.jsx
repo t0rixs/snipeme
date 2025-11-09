@@ -3,12 +3,12 @@ import { OrbitControls, Line } from '@react-three/drei';
 import { useState, useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import Box from '../objects/box';
-import ResetButton from '../objects/tx-reset';
 import AmmoHUD from '../objects/AmmoHUD';
-import MenuButton from '../objects/MenuButton';
+import NextButton from '../objects/NextButton';
+import PauseMenu from '../objects/PauseMenu';
 
 // シーン内のコンポーネント（レイキャスト処理）
-function Scene({ positions, colors, handleClick, onShot, shotLines, boxrotation, boxscale }) {
+function Scene({ positions, colors, onShot, shotLines, boxrotation, boxTypes }) {
     const { camera, scene, raycaster, gl } = useThree();
   
     useEffect(() => {
@@ -24,55 +24,135 @@ function Scene({ positions, colors, handleClick, onShot, shotLines, boxrotation,
         raycaster.setFromCamera(new THREE.Vector2(x, y), camera);
   
         // カメラの位置（ワールド座標）
-        const origin = camera.position.clone();
+        const initialOrigin = camera.position.clone();
+        const initialDirection = raycaster.ray.direction.clone();
   
-        // 交差判定（全てのオブジェクトを取得）
-        const intersects = raycaster.intersectObjects(scene.children, true);
+        // 全てのラインとヒット情報を収集
+        const allLines = [];
+        const allLineHits = []; // 各線が当たったブロックのリスト
+        const passedBoxIndices = [];
+        
+        // 初期状態マップを作成（boxIndexをキーに、現在のboxTypeを値に）
+        const initialBoxStates = new Map(
+          boxTypes.map((type, index) => [index, type])
+        );
+        
+        // 再帰的にレイを追跡する関数（boxStatesマップと、この線のヒットリストを追加）
+        const traceRay = (origin, direction, depth, currentLinePoints, boxStates, lineHitIndices) => {
+          if (depth > 12) return; // 最大深度
+          
+          raycaster.set(origin, direction);
+          const intersects = raycaster.intersectObjects(scene.children, true);
+          
+          if (intersects.length === 0) {
+            // 何にも当たらなかった場合
+            const endPoint = origin.clone().add(direction.clone().multiplyScalar(100));
+            currentLinePoints.push(endPoint.toArray());
+            allLines.push([...currentLinePoints]);
+            allLineHits.push([...lineHitIndices]); // この線が当たったブロックを記録
+            return;
+          }
+          
+          const hit = intersects[0];
+          const point = hit.point;
+          const boxIndex = hit.object.userData?.index;
+          
+          // 重要: boxStatesマップから現在の状態を取得（動的に変化する）
+          const boxType = boxIndex !== undefined 
+            ? boxStates.get(boxIndex) 
+            : hit.object.userData?.boxType;
   
-        // 貫通するラインのポイント配列を作成
-        const linePoints = [origin.toArray()];
-        const hitNormals = [];
-  
-        if (intersects.length > 0) {
-          // 全ての交差点を追加（貫通）
-          intersects.forEach((hit) => {
-            const point = hit.point;
-            linePoints.push(point.toArray());
-  
-            // 法線を取得してワールド座標系に変換
+          currentLinePoints.push(point.toArray());
+          
+          // 透過ブロック（bref, bblc）の処理
+          const isPassThroughBlock = boxType === 'bref' || boxType === 'bblc';
+          
+          if (isPassThroughBlock) {
+            if (boxIndex !== undefined) {
+              passedBoxIndices.push(boxIndex);
+              
+              // 重要: 状態を更新（新しいMapを作成して状態遷移を記録）
+              const newBoxStates = new Map(boxStates);
+              if (boxType === 'bref') {
+                newBoxStates.set(boxIndex, 'ref'); // 透明白 → 白
+              } else if (boxType === 'bblc') {
+                newBoxStates.set(boxIndex, 'blc'); // 透明灰 → 灰
+              }
+              
+              const newOrigin = point.clone().add(direction.clone().multiplyScalar(0.01));
+              // 更新された状態マップを渡す
+              traceRay(newOrigin, direction, depth + 1, currentLinePoints, newBoxStates, lineHitIndices);
+            } else {
+              const newOrigin = point.clone().add(direction.clone().multiplyScalar(0.01));
+              traceRay(newOrigin, direction, depth + 1, currentLinePoints, boxStates, lineHitIndices);
+            }
+            return;
+          }
+          
+          // プリズムブロックの処理（反射と貫通の両方）
+          if (boxType === 'prism') {
             if (hit.face) {
               const normal = hit.face.normal.clone();
               const worldNormal = normal.transformDirection(hit.object.matrixWorld);
-              hitNormals.push({
-                position: point.toArray(),
-                direction: worldNormal.toArray(),
-              });
+              
+              // 反射線を追跡（新しい線なので、現在のヒットリストをコピー）
+              const incident = direction.clone();
+              const reflectDir = incident.reflect(worldNormal);
+              const reflectOrigin = point.clone().add(reflectDir.clone().multiplyScalar(0.01));
+              traceRay(reflectOrigin, reflectDir, depth + 1, [...currentLinePoints], boxStates, [...lineHitIndices]);
+              
+              // 貫通線を追跡（新しい線なので、現在のヒットリストをコピー）
+              const throughOrigin = point.clone().add(direction.clone().multiplyScalar(0.01));
+              traceRay(throughOrigin, direction, depth + 1, [...currentLinePoints], boxStates, [...lineHitIndices]);
             }
-          });
+            return;
+          }
+          
+          // 通常ブロックのインデックスを記録
+          if (boxIndex !== undefined && boxType !== 'ref' && boxType !== 'blc' && boxType !== 'bref' && boxType !== 'bblc' && boxType !== 'prism') {
+            lineHitIndices.push(boxIndex); // この線のヒットリストに追加
+          }
+          
+          if (hit.face) {
+            const normal = hit.face.normal.clone();
+            const worldNormal = normal.transformDirection(hit.object.matrixWorld);
+            
+            if (boxType === 'blc' || boxType === 'bblc') {
+              // 停止ブロック
+              allLines.push([...currentLinePoints]);
+              allLineHits.push([...lineHitIndices]); // この線が当たったブロックを記録
+            } else if (boxType === 'ref' || boxType === 'bref') {
+              // 反射ブロック
+              const incident = direction.clone();
+              const reflectDir = incident.reflect(worldNormal);
+              const newOrigin = point.clone().add(reflectDir.clone().multiplyScalar(0.01));
+              traceRay(newOrigin, reflectDir, depth + 1, currentLinePoints, boxStates, lineHitIndices);
+            } else {
+              // 通常ブロック：貫通
+              const newOrigin = point.clone().add(direction.clone().multiplyScalar(0.01));
+              traceRay(newOrigin, direction, depth + 1, currentLinePoints, boxStates, lineHitIndices);
+            }
+          } else {
+            allLines.push([...currentLinePoints]);
+            allLineHits.push([...lineHitIndices]); // この線が当たったブロックを記録
+          }
+        };
+        
+        // 初期レイから追跡開始（初期状態マップと空のヒットリストを渡す）
+        traceRay(initialOrigin, initialDirection, 0, [initialOrigin.toArray()], initialBoxStates, []);
   
-          // 最後の交差点から先へ延長
-          const direction = raycaster.ray.direction.clone();
-          const lastPoint = new THREE.Vector3().fromArray(linePoints[linePoints.length - 1]);
-          const endPoint = lastPoint.clone().add(direction.multiplyScalar(50));
-          linePoints.push(endPoint.toArray());
-        } else {
-          // 何にも当たらなかった場合、遠くの点を計算
-          const direction = raycaster.ray.direction.clone();
-          const endPoint = origin.clone().add(direction.multiplyScalar(100));
-          linePoints.push(endPoint.toArray());
-        }
-  
-        // ラインデータを送信
+        // ラインデータと当たったボックスのインデックスを送信
         onShot({
           id: Date.now(),
-          points: linePoints,
-          normals: hitNormals,
+          lines: allLines, // 複数のライン
+          lineHits: allLineHits, // 各線が当たったブロックのリスト
+          passedBoxIndices: passedBoxIndices,
         });
       };
   
       gl.domElement.addEventListener('click', handleCanvasClick);
       return () => gl.domElement.removeEventListener('click', handleCanvasClick);
-    }, [camera, scene, raycaster, gl, onShot]);
+    }, [camera, scene, raycaster, gl, onShot, boxTypes]);
   
     return (
       <>
@@ -83,68 +163,139 @@ function Scene({ positions, colors, handleClick, onShot, shotLines, boxrotation,
             key={index}
             position={position}
             color={colors[index]}
-            onClick={() => handleClick(index)}
             rotation={boxrotation}
-            scale={boxscale}
+            index={index}
+            boxType={boxTypes[index]}
           />
         ))}
         {/* ショットラインを表示 */}
-        {shotLines.map((line) => (
-          <group key={line.id}>
-            {/* メインライン（貫通ライン）*/}
-            <Line
-              points={line.points}
-              color="yellow"
-              lineWidth={3}
-            />
+        {shotLines.map((shot) => (
+          <group key={shot.id}>
+            {shot.lines && shot.lines.map((linePoints, idx) => (
+              <Line
+                key={idx}
+                points={linePoints}
+                color="yellow"
+                lineWidth={3}
+              />
+            ))}
           </group>
         ))}
       </>
     );
   }
   
-  export default function GameComponent({positions, baseshot, boxrotation, boxscale}) {
+export default function GameComponent({positions, baseshot, boxrotation, cameraFov = 50, boxTypes = [], stageIndex, isEditMode = false, onBackToEdit = null}) {
 
-    const DRAG_THRESHOLD = 5; // ピクセル単位の閾値
+  const DRAG_THRESHOLD = 5; // ピクセル単位の閾値
   
-    const [colors, setColors] = useState(
-      positions.map(() => 'royalblue')
-    );
+  // デフォルトで全て1回（通常のbox）
+  const initialTypes = boxTypes.length > 0 ? boxTypes : positions.map(() => 1);
+
+  // ボックスタイプの状態管理（透過ブロックの遷移に使用）
+  const [types, setTypes] = useState(initialTypes);
+
+  // 各ボックスの残りヒット回数を管理（JSONの値をそのまま使用）
+  const [remainingHits, setRemainingHits] = useState(
+    initialTypes.map(type => typeof type === 'number' ? type : 0)
+  );
   
-    const [backgroundcolors, setBackgroundcolors] = useState('black');
-    const [shotRemaining, setShotRemaining] = useState(baseshot);
-    const [shotLines, setShotLines] = useState([]); // 撃ったラインを保存
+  // 残りヒット回数とタイプから色を計算
+  const getColor = (remaining, boxType) => {
+    // ギミックブロック（色は固定、ヒットしても変わらない）
+    if (boxType === 'ref') {
+      return 'white'; // 反射ブロック
+    } else if (boxType === 'blc') {
+      return '#666666'; // 停止ブロック（灰色）
+    } else if (boxType === 'bref') {
+      return 'white'; // 透過反射ブロック（縁のみ）
+    } else if (boxType === 'bblc') {
+      return '#666666'; // 透過停止ブロック（縁のみ）
+    } else if (boxType === 'prism') {
+      return 'white'; // プリズムブロック（半透明白）
+    }
     
-    const pointerDownPos = useRef({ x: 0, y: 0 });
-    const isDragging = useRef(false);
+    // 通常の破壊可能ブロック
+    const maxHits = typeof boxType === 'number' ? boxType : 1;
+    if (remaining === 0) {
+      // 破壊完了
+      return 'red';
+    } else if (remaining === maxHits) {
+      // 未ヒット
+      return maxHits === 2 ? 'purple' : 'royalblue';
+    } else {
+      // ダメージ中（2回必要なboxの1回ヒット後）
+      return 'royalblue';
+    }
+  };
   
-    useEffect(() => {
-      if (colors.every((c) => c === 'red')) {
-        // 成功：全て赤
-        setBackgroundcolors('#c00000');
-      } else if (shotRemaining === 0 && colors.some((c) => c !== 'red')) {
-        // 失敗：弾切れで赤でないボックスが残っている
-        setBackgroundcolors('royalblue');
-      } else {
-        // 通常状態
-        setBackgroundcolors('black');
+  const colors = remainingHits.map((remaining, i) => getColor(remaining, types[i]));
+  
+  const [backgroundcolors, setBackgroundcolors] = useState('black');
+  const [shotRemaining, setShotRemaining] = useState(baseshot);
+  const [shotLines, setShotLines] = useState([]); // 撃ったラインを保存
+  const [isPaused, setIsPaused] = useState(false); // ポーズメニューの表示状態
+  
+  const pointerDownPos = useRef({ x: 0, y: 0 });
+  const isDragging = useRef(false);
+  
+  useEffect(() => {
+    // ギミックでない通常ブロックのインデックスを取得
+    const normalBoxIndices = types
+      .map((type, i) => (
+        type !== 'ref' && 
+        type !== 'blc' && 
+        type !== 'bref' && 
+        type !== 'bblc' && 
+        type !== 'prism' 
+        ? i : -1
+      ))
+      .filter(i => i !== -1);
+    
+    // 通常ブロックが全て赤になったかチェック
+    const allNormalBoxesDestroyed = normalBoxIndices.every(i => colors[i] === 'red');
+    
+    // 通常ブロックでまだ赤でないものがあるかチェック
+    const hasUndestroyedNormalBoxes = normalBoxIndices.some(i => colors[i] !== 'red');
+    
+    if (normalBoxIndices.length > 0 && allNormalBoxesDestroyed) {
+      // 成功：ギミックでないボックスが全て赤
+      setBackgroundcolors('#c00000');
+    } else if (shotRemaining === 0 && hasUndestroyedNormalBoxes) {
+      // 失敗：弾切れで赤でないボックスが残っている
+      setBackgroundcolors('royalblue');
+    } else {
+      // 通常状態
+      setBackgroundcolors('black');
+    }
+  }, [colors, shotRemaining, types]);
+  
+  // Rキーでリセット
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'r' || e.key === 'R') {
+        resetColors();
+        setShotRemaining(baseshot);
       }
-    }, [colors, shotRemaining, baseshot]);
-  
-    // Rキーでリセット
-    useEffect(() => {
-      const handleKeyDown = (e) => {
-        if (e.key === 'r' || e.key === 'R') {
-          resetColors();
-          setShotRemaining(baseshot);
-        }
-      };
-  
-      window.addEventListener('keydown', handleKeyDown);
-      return () => window.removeEventListener('keydown', handleKeyDown);
-    }, [baseshot]);
-  
-    const handlePointerDown = (e) => {
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [baseshot, initialTypes]);
+
+  // ESCキーでポーズメニュー
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape' || e.key === 'Tab' ) {
+        setIsPaused(prev => !prev);
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  const handlePointerDown = (e) => {
       pointerDownPos.current = { x: e.clientX, y: e.clientY };
       isDragging.current = false;
     };
@@ -161,36 +312,65 @@ function Scene({ positions, colors, handleClick, onShot, shotLines, boxrotation,
       }
     };
   
-    const handleClick = (index) => {
-      if (isDragging.current) return;
-      if (shotRemaining <= 0) return;
-  
-      setColors((prev) => {
-        const next = prev.map((c, i) => (i === index ? 'red' : c));
-        return next;
-      });
-    };
-  
-    const clickShot = () => {
+  const clickShot = () => {
       if (isDragging.current) return;
       setShotRemaining((v) => Math.max(v - 1, 0));
     };
   
-    const handleShot = (lineData) => {
-      if (isDragging.current) return;
-      if (shotRemaining <= 0) return;
-      
-      // ラインを追加（2秒後に消える）
-      setShotLines((prev) => [...prev, lineData]);
-      setTimeout(() => {
-        setShotLines((prev) => prev.filter((line) => line.id !== lineData.id));
-      }, 20000000);
-    };
+  const handleShot = (lineData) => {
+    if (isDragging.current) return;
+    if (shotRemaining <= 0) return;
+    
+    // 全ての線のヒットを1つの配列に集める
+    const allHits = [];
+    if (lineData.lineHits) {
+      lineData.lineHits.forEach((lineHits) => {
+        // この線が当たった全てのブロックをallHitsに追加
+        allHits.push(...lineHits);
+      });
+    }
+    
+    // ラインを追加(無期限)
+    setShotLines((prev) => [...prev, lineData]);
+    
+    // 透過ブロックの状態を遷移（カウンターを使わずに現在の状態から次の状態へ）
+    if (lineData.passedBoxIndices && lineData.passedBoxIndices.length > 0) {
+      setTypes((prev) => {
+        const next = [...prev];
+        lineData.passedBoxIndices.forEach((index) => {
+          const currentType = next[index];
+          // 透明白 → 白、透明灰 → 灰
+          if (currentType === 'bref') {
+            next[index] = 'ref';
+          } else if (currentType === 'bblc') {
+            next[index] = 'blc';
+          }
+        });
+        return next;
+      });
+    }
+    
+    // 通常ブロックの状態を遷移（青→赤、紫→青）
+    // 配列の各要素を順番に1つずつデクリメント
+    if (allHits.length > 0) {
+      setRemainingHits((prev) => {
+        const next = [...prev];
+        // 配列の各ヒットを順番に処理
+        allHits.forEach((boxIndex) => {
+          if (next[boxIndex] > 0) {
+            next[boxIndex] -= 1;
+          }
+        });
+        return next;
+      });
+    }
+  };
   
-    const resetColors = () => {
-      setColors(positions.map(() => 'royalblue'));
-      setShotLines([]); // ラインもリセット
-    };
+  const resetColors = () => {
+    setTypes(initialTypes); // boxTypeを初期状態に戻す
+    setRemainingHits(initialTypes.map(type => typeof type === 'number' ? type : 0));
+    setShotLines([]); // ラインもリセット
+  };
   
     return (
       <div 
@@ -199,27 +379,38 @@ function Scene({ positions, colors, handleClick, onShot, shotLines, boxrotation,
         onPointerMove={handlePointerMove}
       >
         <Canvas
-          camera={{ position: [3, 3, 3], fov: 50 }}
+          camera={{ position: [3, 3, 3], fov: cameraFov }}
           style={{ cursor: 'crosshair', background: backgroundcolors }}
           onClick={() => {clickShot()}}
         >
           <Scene 
             positions={positions}
             colors={colors}
-            handleClick={handleClick}
             onShot={handleShot}
             shotLines={shotLines}
             boxrotation={boxrotation}
-            boxscale={boxscale}
+            boxTypes={types}
           />
           <OrbitControls
             enablePan={false}      // 移動を無効化
             enableZoom={false}     // 拡大縮小を無効化
            />
-        </Canvas>
-        {/* <ResetButton shotRemaining={shotRemaining} backgroundcolors={backgroundcolors}/> */}
-        <MenuButton backgroundcolors={backgroundcolors}/>
-        <AmmoHUD current={shotRemaining} max={baseshot} />
-      </div>
-    );
-  }
+      </Canvas>
+      {/* <ResetButton shotRemaining={shotRemaining} backgroundcolors={backgroundcolors}/> */}
+      <NextButton 
+        backgroundcolors={backgroundcolors} 
+        stageIndex={stageIndex} 
+        isEditMode={isEditMode}
+        onBackToEdit={onBackToEdit}
+      />
+      {/* <MenuBackButton backgroundcolors={backgroundcolors}/> */}
+      <AmmoHUD current={shotRemaining} max={baseshot} />
+      <PauseMenu 
+        isOpen={isPaused} 
+        onClose={() => setIsPaused(false)} 
+        isEditMode={isEditMode}
+        onBackToEdit={onBackToEdit}
+      />
+    </div>
+  );
+}

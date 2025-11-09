@@ -1,16 +1,146 @@
-# React + Vite
+# ステージデータ設定ガイド
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## ファイル構造
 
-Currently, two official plugins are available:
+`stages.json` にすべてのステージデータが格納されています。
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+## ステージの追加方法
 
-## React Compiler
+新しいステージを追加するには、`stages.json` の `stages` 配列に新しいオブジェクトを追加します。
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+```json
+{
+  "id": 4,
+  "name": "Stage 0",
+  "positions": [
+    [0, 0, 0],
+    [2, 0, 0]
+  ],
+  "baseshot": 3,
+  "boxrotation": [0, 0, 0],
+  "boxscale": 1,
+  "boxTypes": [1, 2]
+}
+```
 
-## Expanding the ESLint configuration
+## パラメータ説明
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project.
+### `id` (数値)
+
+- ステージの一意な識別子
+- 0 から順番に割り当てる
+
+### `name` (文字列)
+
+- ステージ名（将来的に表示用として使用）
+
+### `positions` (配列の配列)
+
+- 各ボックスの 3D 座標 `[x, y, z]`
+- 例: `[[0, 0, 0], [1, 0, 0]]` = 2 つのボックス
+
+### `baseshot` (数値)
+
+- ステージ開始時の弾数
+- 例: `3` = 3 発の弾
+
+### `boxrotation` (配列)
+
+- すべてのボックスに適用される回転 `[x, y, z]` (度数)
+- 例: `[0, 60, 90]` = X 軸 0 度、Y 軸 60 度、Z 軸 90 度
+
+### `boxscale` (数値)
+
+- すべてのボックスのサイズ倍率(画面に入り切るように調整するための数値)
+- 例: `1` = 標準サイズ、`2` = 2 倍のサイズ
+
+### `boxTypes` (数値の配列)
+
+- 各ボックスのタイプ
+- `1` = 通常 (1 発で破壊)
+- `2` = 強化 (2 発で破壊)
+- `blc` = 停止 (銃弾をストップ)
+- `ref` = 反射 (銃弾を反射)
+- `prz` = 稜鏡 (銃弾を反射&通過で 2 つに複製)
+- `bref` = 透過反射 (銃弾を反射する。ただし一度目は銃弾を通過する)
+- `bblc` = 透過停止 (銃弾を停止する。ただし一度目は銃弾を通過する)
+
+- 配列の長さは `positions` と同じにする必要がある
+
+## 例
+
+### シンプルなステージ
+
+```json
+{
+  "id": 0,
+  "name": "Tutorial",
+  "positions": [[0, 0, 0]],
+  "baseshot": 1,
+  "boxrotation": [0, 0, 0],
+  "boxscale": 1,
+  "boxTypes": [1]
+}
+```
+
+### 複雑なステージ
+
+```json
+{
+  "id": 5,
+  "name": "Hard Level",
+  "positions": [
+    [0, 0, 0],
+    [1, 1, 0],
+    [-1, 0, 1],
+    [0, -1, 1]
+  ],
+  "baseshot": 5,
+  "boxrotation": [45, 30, 60],
+  "boxscale": 1,
+  "boxTypes": [2, 1, 2, 1]
+}
+```
+
+### ギミックブロックを使ったステージ
+
+```json
+{
+  "id": 6,
+  "name": "Reflection Puzzle",
+  "positions": [
+    [0, 0, 0],
+    [1, 0, 0],
+    [2, 0, 0],
+    [1, 1, 0]
+  ],
+  "baseshot": 3,
+  "boxrotation": [0, 0, 0],
+  "boxscale": 1,
+  "boxTypes": [1, "ref", 1, "blc"]
+}
+```
+
+上記の例では：
+
+- 1 つ目のボックス = 通常（青）
+- 2 つ目のボックス = 反射（白） - ギミック
+- 3 つ目のボックス = 通常（青）
+- 4 つ目のボックス = 停止（灰色） - ギミック
+
+## 注意事項
+
+1. **`positions` と `boxTypes` の長さを一致させる**
+
+   - 各ボックスにタイプが必要です
+
+2. **`id` は連番にする**
+
+   - ステージ選択画面で順番に表示されます
+
+3. **座標の正規化**
+
+   - 自動的に座標が正規化され、中心が原点になります
+
+4. **ファイルを保存後、再読み込みが必要**
+   - 開発中は自動リロードされますが、本番環境ではビルドが必要です

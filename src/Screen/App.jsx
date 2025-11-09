@@ -1,20 +1,25 @@
 import { Routes, Route, useParams } from 'react-router-dom';
 import GameScreen from './GameScreen';
 import HomeScreen from './HomeScreen';
+import MakeScreen from './MakeScreen';
+import stagesData from '../data/stages.json';
 
 function GameScreenWrapper() {
   const { stage } = useParams();
   const stageIndex = parseInt(stage);
   
-  const positions = [
-    [[0,0,0]],
-    [[1,1,1],[1,2,0],[3,1,0],[0,0,1]],
-    [[0,0,0],[1,0,0],[0,1,0],[0,0,1]]
-  ];
-
-  const baseshot = [1,2,1];
-  const boxrotation = [[0,0,0],[180,30,0],[0,60,90]];
-  const boxscale = [1,1,1];
+  // JSONからステージデータを取得
+  const stageConfig = stagesData.stages[stageIndex];
+  
+  // ステージが存在しない場合のエラーハンドリング
+  if (!stageConfig) {
+    return (
+      <div style={{ color: 'white', textAlign: 'center', padding: '50px' }}>
+        <h1>ステージが見つかりません</h1>
+        <button onClick={() => window.location.href = '/'}>ホームに戻る</button>
+      </div>
+    );
+  }
     
   // 座標を正規化する関数（各軸の中心が0になるように調整）
   const normalizePositions = (posArray) => {
@@ -47,10 +52,13 @@ function GameScreenWrapper() {
   
   return (
     <GameScreen 
-      positions={normalizePositions(positions[stageIndex])} 
-      baseshot={baseshot[stageIndex]} 
-      boxrotation={boxrotation[stageIndex]} 
-      boxscale={boxscale[stageIndex]} 
+      key={stageIndex} // stageが変わるたびにコンポーネントを再マウント
+      positions={normalizePositions(stageConfig.positions)} 
+      baseshot={stageConfig.baseshot} 
+      boxrotation={stageConfig.boxrotation} 
+      cameraFov={stageConfig.cameraFov || 50}
+      boxTypes={stageConfig.boxTypes}
+      stageIndex={stageIndex}
     />
   );
 }
@@ -61,6 +69,7 @@ export default function App() {
       <Routes>
         <Route path="/" element={<HomeScreen />} />
         <Route path="/game/:stage" element={<GameScreenWrapper />} />
+        <Route path="/make" element={<MakeScreen />} />
       </Routes>
     </div>
   );

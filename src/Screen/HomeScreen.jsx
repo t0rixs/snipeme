@@ -1,12 +1,16 @@
+import { useNavigate } from 'react-router-dom';
 import StageButton from '../objects/StageButton';
+import logo from '../assets/logo.png';
+import stagesData from '../data/stages.json';
 
 function HomeScreen() {
-    // ステージの定義（App.jsx のステージ数に合わせて自動生成）
-    const stages = [
-        { index: 0, label: 'Stage 1' },
-        { index: 1, label: 'Stage 2' },
-        { index: 2, label: 'Stage 3' }
-    ];
+    const navigate = useNavigate();
+    
+    // JSONからステージ数を自動生成
+    const stages = stagesData.stages.map((stage, index) => ({
+        index: index,
+        label: `${index + 1}`
+    }));
     
     return (
         <div style={{ 
@@ -18,14 +22,16 @@ function HomeScreen() {
             justifyContent: 'center',
             minHeight: '100vh'
         }}>
-            <h1 style={{ 
-                color: 'white', 
-                fontSize: '48px',
-                marginBottom: '40px',
-                fontWeight: 'bold'
-            }}>
-                Snipe me
-            </h1>
+            <img 
+                src={logo} 
+                alt="Snipe me" 
+                style={{ 
+                    maxWidth: '400px', 
+                    width: '80%',
+                    height: 'auto',
+                    marginBottom: '40px'
+                }} 
+            />
             
             <div style={{ 
                 display: 'flex',
@@ -41,6 +47,34 @@ function HomeScreen() {
                         label={stage.label}
                     />
                 ))}
+                <button 
+                    onClick={() => navigate('/make')}
+                    style={{
+                        margin: '10px',
+                        padding: '10px 20px',
+                        fontSize: '16px',
+                        cursor: 'pointer',
+                        backgroundColor: '#e67e22',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '8px',
+                        transition: 'all 0.3s ease',
+                        minWidth: '120px',
+                        fontWeight: '500',
+                    }}
+                    onMouseEnter={(e) => {
+                        e.target.style.backgroundColor = '#d35400';
+                        e.target.style.transform = 'translateY(-2px)';
+                        e.target.style.boxShadow = '0 4px 8px rgba(0,0,0,0.3)';
+                    }}
+                    onMouseLeave={(e) => {
+                        e.target.style.backgroundColor = '#e67e22';
+                        e.target.style.transform = 'translateY(0)';
+                        e.target.style.boxShadow = 'none';
+                    }}
+                >
+                    ステージ作成
+                </button>
             </div>
         </div>
     )
